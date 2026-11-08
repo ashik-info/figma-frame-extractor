@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,12 +13,17 @@ import (
 )
 
 func ExtractFrame(client *http.Client, rawURL, token string, output io.Writer) error {
+	return ExtractFrameContext(context.Background(), client, rawURL, token, output)
+}
+
+// ExtractFrameContext extracts a node and allows requests and rate-limit waits to be cancelled.
+func ExtractFrameContext(ctx context.Context, client *http.Client, rawURL, token string, output io.Writer) error {
 	target, err := utils.ExtractTarget(rawURL)
 	if err != nil {
 		return fmt.Errorf("extract Figma parameters: %w", err)
 	}
 
-	node, err := fetchNode(client, target, token)
+	node, err := fetchNode(ctx, client, target, token)
 	if err != nil {
 		return err
 	}
@@ -30,15 +36,15 @@ func ExtractFrame(client *http.Client, rawURL, token string, output io.Writer) e
 	return nil
 }
 
-func fetchNode(client *http.Client, target models.Target, token string) (models.FigmaNode, error) {
+func fetchNode(ctx context.Context, client *http.Client, target models.Target, token string) (models.FigmaNode, error) {
 	url := fmt.Sprintf("https://api.figma.com/v1/files/%s/nodes?ids=%s", target.FileKey, target.NodeID)
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return models.FigmaNode{}, fmt.Errorf("create Figma request: %w", err)
 	}
 	req.Header.Set("X-Figma-Token", token)
 
-	resp, err := client.Do(req)
+	resp, err := requestWithRetry(client, req, waitForRetry)
 	if err != nil {
 		return models.FigmaNode{}, fmt.Errorf("request Figma node: %w", err)
 	}
